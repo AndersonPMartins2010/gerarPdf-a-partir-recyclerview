@@ -1,0 +1,183 @@
+/*
+
+* A função do código é substituir o método depreciado startActivityForResult
+* Gerar um arquivo PDF a partir de um bitmap do recycleView.
+* Deve ser iniciado o método criarPdf(); passando uma string titulo.
+
+*/
+
+//Gerando um BitMap
+    private Bitmap fotoDoRecyclerView (RecyclerView view){
+
+        RecyclerView.Adapter adapter = view.getAdapter();
+
+        Bitmap bitmapPronto = null;
+
+        if (adapter != null){
+
+            Paint paint = new Paint();
+
+            int tamanhoDaLista = adapter.getItemCount();
+            int altura = 0;
+            int alturaVolatil = 0;
+
+            final int tamanhoMaximoDoArquivo = (int)(Runtime.getRuntime().maxMemory( )/1024);
+            final int tamanhoDoCache = tamanhoMaximoDoArquivo / 8;
+            LruCache<String, Bitmap> bitmapCache = new LruCache<>(tamanhoDoCache);
+
+            for (int x = 0; x < tamanhoDaLista; x++){
+
+                RecyclerView.ViewHolder holder = adapter.createViewHolder(view, adapter.getItemViewType(x));
+                adapter.onBindViewHolder(holder,x);
+                holder.itemView.measure( View.MeasureSpec.makeMeasureSpec(view.getWidth(),View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+
+                holder.itemView.layout(0,0,
+                        holder.itemView.getMeasuredWidth(),
+                        holder.itemView.getMeasuredHeight());
+
+
+                holder.itemView.setDrawingCacheEnabled(true);
+                holder.itemView.buildDrawingCache();
+
+
+                Bitmap cacheDobitmap = holder.itemView.getDrawingCache();
+
+                if (cacheDobitmap != null){
+
+                    bitmapCache.put(String.valueOf(x),cacheDobitmap);
+                }
+
+                altura += holder.itemView.getMeasuredHeight();
+
+
+            }
+            bitmapPronto = Bitmap.createBitmap(view.getMeasuredWidth(),altura, Bitmap.Config.ARGB_8888);
+
+            Canvas pagina = new Canvas(bitmapPronto);
+            pagina.drawColor(Color.WHITE);
+
+            for (int x = 0; x < tamanhoDaLista; x++){
+
+                Bitmap bitmap = bitmapCache.get(String.valueOf(x));
+                pagina.drawBitmap(bitmap, 0, alturaVolatil,paint);
+                alturaVolatil += bitmap.getHeight();
+                bitmap.recycle();
+
+            }
+
+        }
+
+        return bitmapPronto;
+    }
+
+    //Inicio teste de criação de PDF para API29
+    private void criarPdf (String title){
+
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/pdf");
+        intent.putExtra(Intent.EXTRA_TITLE, title);
+        //startActivityForResult(intent, CREATE_FILE); depreciado
+        pdfActivity.launch(intent);
+
+    }
+    ActivityResultLauncher<Intent> pdfActivity = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result ->{
+               // if (result.getResultCode() == CREATE_FILE){
+
+                    Intent intent1 = result.getData();
+
+                    if (intent1!= null){
+
+                        //Inicio da migração do bitmap
+                        Bitmap bitmapRecycler = fotoDoRecyclerView(recyclerRelatorio);
+                        int numeroDePaginas = (bitmapRecycler.getHeight()/1754) + 1;
+                        Bitmap[] bitmaps = new Bitmap[numeroDePaginas];
+
+                        int alturabitmap = bitmapRecycler.getHeight()/numeroDePaginas;
+
+                        //Uri caminhoDoArquivo = data.getData();
+                        Uri caminhoDoArquivo = intent1.getData();
+
+                        PdfDocument pdfDocument = new PdfDocument();
+
+                        for(int p = 0; p < numeroDePaginas; p++){
+
+                            bitmaps[p] = Bitmap.createBitmap(bitmapRecycler,0, p*alturabitmap,
+                                    bitmapRecycler.getWidth(),alturabitmap);
+
+                            Paint paint = new Paint();
+                            PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo
+                                    .Builder(1240,1754,p).create();
+
+                            PdfDocument.Page pagina = pdfDocument.startPage(pageInfo);
+
+                            Canvas canvas = pagina.getCanvas();
+
+                            //Escrever título
+                            paint.setTextAlign(Paint.Align.RIGHT);
+                            paint.setTextSize(25f);
+                            paint.setFakeBoldText(true);
+                            canvas.drawText("Controle Car: "+ placa  +" - "+ mesAnoSelecionado + " HT: "+ totalFinalHoras+ " TK: "+ totalKm +"  Caxeta System®" ,800,30,paint);
+                            canvas.drawLine(35,35,pageInfo.getPageWidth(),35,paint);
+                            //fim
+
+                            canvas.drawBitmap(bitmaps[p],null, new Rect(30, 40,bitmaps[p].getWidth(),bitmaps[p].getHeight()),null);
+                            pdfDocument.finishPage(pagina);
+
+
+                        }
+                        gravarPdf(caminhoDoArquivo, pdfDocument);
+                    }
+
+               // }
+            }
+    );
+
+    private void gravarPdf(Uri caminhoDoArquivo, PdfDocument pdfDocument){
+
+        try {
+
+            BufferedOutputStream stream = new BufferedOutputStream(getContentResolver()
+                    .openOutputStream(caminhoDoArquivo));
+            pdfDocument.writeTo(stream);
+            pdfDocument.close();
+            stream.flush();
+            toast();// toast com imagem
+
+        }catch (FileNotFoundException e){
+
+            Toast.makeText(getApplicationContext(),"Erro: " + e,
+                    Toast.LENGTH_SHORT).show();
+
+        }catch (IOException e){
+
+            Toast.makeText(getApplicationContext(),"Erro: " + e,
+                    Toast.LENGTH_SHORT).show();
+        }catch (Exception e){
+
+            Toast.makeText(getApplicationContext(),"Erro: " + e,
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    //Fim do processo de gerar PDF
+
+//Exibir mensagem de arquivo gerado com sucesso.
+private void toast(){
+        LayoutInflater layoutInflater = getLayoutInflater();
+
+        int layout = R.layout.toast_pdf;
+        ViewGroup viewGroup = (ViewGroup) findViewById(R.id.toast_layout_root);
+        View view = layoutInflater.inflate(layout, viewGroup);
+
+        TextView tv_texto = (TextView) view.findViewById(R.id.texto);
+        tv_texto.setText("Arquivo PDF");
+
+        Toast toast = new Toast(this);
+        toast.setDuration(Toast.LENGTH_LONG);
+        toast.setView(view);
+        toast.show();
+    }
